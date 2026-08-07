@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirmar venta - Fase 7</title>
+<style>
+  body { font-family: sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  h2 { text-align: center; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  th, td { text-align: left; padding: 8px 4px; border-bottom: 1px solid #ddd; font-size: 14px; }
+  #total { text-align: right; font-size: 18px; font-weight: bold; margin-top: 12px; }
+  #reasons { margin-top: 16px; padding: 12px; background: #fee; border-radius: 8px; color: #900; }
+  #reasons ul { margin: 8px 0 0 20px; padding: 0; }
+  #status { margin-top: 16px; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; }
+  .buttons { display: flex; gap: 12px; margin-top: 20px; }
+  button { flex: 1; font-size: 16px; padding: 14px; border-radius: 8px; border: none; }
+  #confirmBtn { background: #2a7; color: white; }
+  #confirmBtn:disabled { background: #ccc; color: #888; }
+  #rejectBtn { background: #d33; color: white; }
+  #loading { text-align: center; color: #555; }
+</style>
+</head>
+<body>
+  <h2>Confirmar venta</h2>
+  <div id="loading">Cargando...</div>
+  <div id="content" style="display:none;">
+    <table id="linesTable">
+      <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Total</th></tr></thead>
+      <tbody id="linesBody"></tbody>
+    </table>
+    <div id="total"></div>
+    <div id="reasons" style="display:none;"></div>
+    <div class="buttons">
+      <button id="confirmBtn">Confirmar</button>
+      <button id="rejectBtn">Rechazar</button>
+    </div>
+    <div id="status" style="display:none;"></div>
+  </div>
+
+<script>
+const BASE_URL = 'https://aiautomationswork.app.n8n.cloud/webhook';
+const params = new URLSearchParams(window.location.search);
+const saleId = params.get('sale_id');
+
+const loadingEl = document.getElementById('loading');
+const contentEl = document.getElementById('content');
+const linesBody = document.getElementById('linesBody');
+const totalEl = document.getElementById('total');
+const reasonsEl = document.getElementById('reasons');
+const statusEl = document.getElementById('status');
+const confirmBtn = document.getElementById('confirmBtn');
+const rejectBtn = document.getElementById('rejectBtn');
+
+function money(n) {
+  return n == null ? '-' : Number(n).toLocaleString('es-CO');
+}
+
+async function loadSale() {
+  if (!saleId) {
+    loadingEl.textContent = 'Falta sale_id en la URL.';
+    return;
+  }
+  const res = await fetch(`${BASE_URL}/phase7-get-sale?sale_id=${encodeURIComponent(saleId)}`);
+  const data = await res.json();
+  loadingEl.style.display = 'none';
+  contentEl.style.display = 'block';
+
+  if (!data.found) {
+    reasonsEl.style.display = 'block';
+    reasonsEl.innerHTML = `<strong>No se pudo cargar la venta.</strong><div>${data.error}</div>`;
+    confirmBtn.style.display = 'none';
+    rejectBtn.style.display = 'none';
+    return;
+  }
+
+  data.lines.forEach(line => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${line.official_name ?? line.spoken_name}</td><td>${line.quantity}</td><td>${money(line.unit_price)}</td><td>${money(line.line_total)}</td>`;
+    linesBody.appendChild(tr);
+  });
+  totalEl.textContent = data.sale_valid ? `Total: $${money(data.sale_total)}` : '';
+
+  if (!data.sale_valid) {
+    reasonsEl.style.display = 'block';
+    const reasons = (data.invalid_reasons || []).map(r => `<li>${r}</li>`).join('');
+    reasonsEl.innerHTML = `<strong>Esta venta no se puede confirmar.</strong><ul>${reasons}</ul>`;
+  }
+
+  confirmBtn.disabled = !data.confirm_enabled;
+  if (data.confirmation_status !== 'PENDING_CONFIRMATION') {
+    statusEl.style.display = 'block';
+    statusEl.textContent = `Estado actual: ${data.confirmation_status}`;
+    confirmBtn.disabled = true;
+    rejectBtn.disabled = true;
+  }
+}
+
+async function sendAction(action) {
+  confirmBtn.disabled = true;
+  rejectBtn.disabled = true;
+  const res = await fetch(`${BASE_URL}/phase7-sale-action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sale_id: saleId, action })
+  });
+  const data = await res.json();
+  statusEl.style.display = 'block';
+  statusEl.textContent = data.message || data.error || data.result;
+}
+
+confirmBtn.addEventListener('click', () => sendAction('confirm'));
+rejectBtn.addEventListener('click', () => sendAction('reject'));
+
+loadSale();
+</script>
+</body>
+</html>
