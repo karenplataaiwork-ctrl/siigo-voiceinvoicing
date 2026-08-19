@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark de transcripcion (prueba temporal)</title>
+<style>
+  body { font-family: sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  h2 { text-align: center; }
+  p.warn { background: #ffb; padding: 10px; border-radius: 8px; font-size: 14px; }
+  label { display: block; margin-top: 14px; font-weight: bold; }
+  select, input { font-size: 16px; padding: 8px; width: 100%; box-sizing: border-box; margin-top: 4px; }
+  .buttons { text-align: center; margin-top: 18px; }
+  button { font-size: 18px; padding: 14px 28px; margin: 8px; border-radius: 8px; border: none; }
+  #record { background: #d33; color: white; }
+  #stop { background: #333; color: white; }
+  #status { margin-top: 16px; color: #555; text-align: center; }
+  .config-block { margin-top: 16px; padding: 12px; background: #f4f4f4; border-radius: 8px; }
+  .config-block h3 { margin: 0 0 6px 0; font-size: 15px; }
+  .config-block .transcript { font-size: 15px; white-space: pre-wrap; }
+  .config-block .error { color: #900; font-size: 13px; }
+  #diagnostics { margin-top: 16px; padding: 10px; background: #eef; border-radius: 8px; font-size: 12px; color: #333; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h2>Prueba de transcripcion (A/B/C)</h2>
+  <p class="warn">Herramienta de PRUEBA TEMPORAL. No crea ventas ni facturas. Solo compara tres formas de transcribir el mismo audio.</p>
+
+  <label for="testId">Prueba</label>
+  <select id="testId">
+    <option value="TEST1_cuidacan">TEST 1 - Cuidacan (quince kilos)</option>
+    <option value="TEST2_suplepollo">TEST 2 - Cuida suple pollo</option>
+    <option value="TEST3_tilapia34">TEST 3 - Tilapia treinta y cuatro</option>
+    <option value="TEST4_combinado">TEST 4 - Combinado dificil (3 productos)</option>
+    <option value="TEST5_multi_a">TEST 5 - Venta multiproducto (5 productos)</option>
+    <option value="TEST6_multi_b">TEST 6 - Venta multiproducto (4-6 productos, otra)</option>
+  </select>
+
+  <label for="take">Repeticion (take)</label>
+  <input id="take" type="number" value="1" min="1" max="3">
+
+  <div class="buttons">
+    <button id="record">Grabar</button>
+    <button id="stop" disabled>Detener</button>
+  </div>
+  <div id="status">Selecciona la prueba y presiona Grabar.</div>
+
+  <div id="results"></div>
+  <div id="diagnostics"></div>
+
+<script>
+// TEMPORARY BENCHMARK ONLY. Points at an isolated test workflow, never the production
+// Audio Webhook. Does not create pending sales, does not touch Siigo, does not touch
+// production aliases/catalog/fuzzy resolver.
+const WEBHOOK_URL = 'https://aiautomationswork.app.n8n.cloud/webhook/phase9-stt-benchmark';
+
+// Same capture logic as the production recorder (phase9-recorder.html), reused as-is
+// so the captured audio characteristics match real production conditions exactly.
+const MIME_CANDIDATES = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg'];
+function pickSupportedMimeType() {
+  for (const type of MIME_CANDIDATES) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+  return '';
+}
+function extensionForMimeType(type) {
+  if (type.includes('mp4')) return 'mp4';
+  if (type.includes('ogg')) return 'ogg';
+  return 'webm';
+}
+
+let mediaRecorder;
+let chunks = [];
+let selectedMimeType = '';
+
+const recordBtn = document.getElementById('record');
+const stopBtn = document.getElementById('stop');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
+const diagEl = document.getElementById('diagnostics');
+const testIdEl = document.getElementById('testId');
+const takeEl = document.getElementById('take');
+
+function logDiag(fields) {
+  diagEl.textContent = Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+
+function renderConfig(title, cfg) {
+  if (!cfg) return `<div class="config-block"><h3>${title}</h3><div class="error">Sin respuesta</div></div>`;
+  const body = cfg.error
+    ? `<div class="error">Error: ${cfg.error}</div>`
+    : `<div class="transcript">${cfg.text || '(vacio)'}</div>`;
+  return `<div class="config-block"><h3>${title} — ${cfg.model} (${cfg.context})</h3>${body}</div>`;
+}
+
+recordBtn.addEventListener('click', async () => {
+  chunks = [];
+  resultsEl.innerHTML = '';
+  diagEl.textContent = '';
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  selectedMimeType = pickSupportedMimeType();
+  mediaRecorder = selectedMimeType
+    ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+    : new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+  mediaRecorder.onstop = submitRecording;
+  mediaRecorder.start();
+  statusEl.textContent = 'Grabando... habla con naturalidad.';
+  recordBtn.disabled = true;
+  stopBtn.disabled = false;
+});
+
+stopBtn.addEventListener('click', () => {
+  mediaRecorder.stop();
+  mediaRecorder.stream.getTracks().forEach(t => t.stop());
+  recordBtn.disabled = false;
+  stopBtn.disabled = true;
+});
+
+async function submitRecording() {
+  statusEl.textContent = 'Procesando (comparando 3 configuraciones)...';
+  const actualType = mediaRecorder.mimeType || selectedMimeType || 'audio/webm';
+  const blob = new Blob(chunks, { type: actualType });
+  const ext = extensionForMimeType(actualType);
+  const formData = new FormData();
+  formData.append('audio_file', blob, `recording.${ext}`);
+  formData.append('test_id', testIdEl.value);
+  formData.append('take', takeEl.value);
+
+  let httpStatus = null;
+  try {
+    const res = await fetch(WEBHOOK_URL, { method: 'POST', body: formData });
+    httpStatus = res.status;
+    const data = await res.json();
+    statusEl.textContent = 'Listo. Puedes grabar la siguiente prueba.';
+
+    resultsEl.innerHTML =
+      renderConfig('A - Actual (produccion)', data.config_a) +
+      renderConfig('B - Mismo modelo + vocabulario', data.config_b) +
+      renderConfig('C - Modelo nuevo + palabras clave', data.config_c);
+
+    logDiag({
+      'Prueba': data.test_id,
+      'Repeticion': data.take,
+      'MIME type usado': actualType,
+      'Tamano del blob': blob.size + ' bytes',
+      'Estado HTTP': httpStatus
+    });
+  } catch (err) {
+    statusEl.textContent = 'Error al enviar la grabacion.';
+    resultsEl.innerHTML = `<div class="config-block error">${String(err)}</div>`;
+    logDiag({
+      'MIME type usado': actualType,
+      'Tamano del blob': blob.size + ' bytes',
+      'Estado HTTP': httpStatus ?? '(sin respuesta)'
+    });
+  }
+}
+</script>
+</body>
+</html>
