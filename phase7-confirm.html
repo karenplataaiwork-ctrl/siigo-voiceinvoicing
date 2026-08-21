@@ -52,6 +52,9 @@ const statusEl = document.getElementById('status');
 const confirmBtn = document.getElementById('confirmBtn');
 const rejectBtn = document.getElementById('rejectBtn');
 
+const POLL_INTERVAL_MS = 2000;
+const POLL_TIMEOUT_MS = 30000;
+
 function money(n) {
   return n == null ? '-' : Number(n).toLocaleString('es-CO');
 }
@@ -96,17 +99,68 @@ async function loadSale() {
   }
 }
 
+function showStatus(text) {
+  statusEl.style.display = 'block';
+  statusEl.textContent = text;
+}
+
+// Read-only: polls the existing GET confirmation endpoint for invoice_status.
+// Never writes, never retries the action, stops on any terminal status or on timeout.
+async function pollInvoiceStatus() {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+
+    let data;
+    try {
+      const res = await fetch(`${BASE_URL}/phase7-get-sale?sale_id=${encodeURIComponent(saleId)}`);
+      data = await res.json();
+    } catch (err) {
+      continue; // transient read failure -- keep polling, no side effect
+    }
+    if (!data || !data.found) continue;
+
+    const status = data.invoice_status;
+
+    if (status === 'CREATED') {
+      showStatus('Venta enviada a la DIAN correctamente.');
+      return;
+    }
+    if (status === 'FAILED') {
+      showStatus('No se pudo enviar la venta a la DIAN. No vuelvas a confirmar esta venta.');
+      return;
+    }
+    if (status === 'RECONCILIATION_REQUIRED') {
+      showStatus('No se pudo confirmar el envio a la DIAN. No vuelvas a confirmar esta venta.');
+      return;
+    }
+    // NOT_CREATED / INVOICE_CREATING / unknown -- still in progress, keep polling
+  }
+
+  showStatus('La venta todavia se esta procesando. No vuelvas a confirmarla.');
+}
+
 async function sendAction(action) {
   confirmBtn.disabled = true;
   rejectBtn.disabled = true;
+
+  if (action === 'confirm') {
+    showStatus('Enviando venta a la DIAN...');
+  }
+
   const res = await fetch(`${BASE_URL}/phase7-sale-action`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sale_id: saleId, action })
   });
   const data = await res.json();
-  statusEl.style.display = 'block';
-  statusEl.textContent = data.message || data.error || data.result;
+
+  if (action === 'confirm' && data.result === 'confirmed') {
+    await pollInvoiceStatus();
+  } else {
+    showStatus(data.message || data.error || data.result);
+  }
 }
 
 confirmBtn.addEventListener('click', () => sendAction('confirm'));
