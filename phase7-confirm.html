@@ -61,17 +61,25 @@ function money(n) {
 
 async function loadSale() {
   if (!saleId) {
-    loadingEl.textContent = 'Falta sale_id en la URL.';
+    loadingEl.textContent = 'No se pudo abrir esta venta: falta el identificador en el enlace.';
     return;
   }
-  const res = await fetch(`${BASE_URL}/phase7-get-sale?sale_id=${encodeURIComponent(saleId)}`);
-  const data = await res.json();
+
+  let data;
+  try {
+    const res = await fetch(`${BASE_URL}/phase7-get-sale?sale_id=${encodeURIComponent(saleId)}`);
+    data = await res.json();
+  } catch (err) {
+    loadingEl.textContent = 'No pudimos cargar los datos de esta venta. Verifica tu conexion a internet e intenta abrir el enlace de nuevo.';
+    return;
+  }
+
   loadingEl.style.display = 'none';
   contentEl.style.display = 'block';
 
   if (!data.found) {
     reasonsEl.style.display = 'block';
-    reasonsEl.innerHTML = `<strong>No se pudo cargar la venta.</strong><div>${data.error}</div>`;
+    reasonsEl.innerHTML = `<strong>No encontramos esta venta.</strong><div>Es posible que el enlace ya no sea valido. Si el cliente todavia necesita la factura, graba la venta de nuevo desde el inicio.</div>`;
     confirmBtn.style.display = 'none';
     rejectBtn.style.display = 'none';
     return;
@@ -87,15 +95,19 @@ async function loadSale() {
   if (!data.sale_valid) {
     reasonsEl.style.display = 'block';
     const reasons = (data.invalid_reasons || []).map(r => `<li>${r}</li>`).join('');
-    reasonsEl.innerHTML = `<strong>Esta venta no se puede confirmar.</strong><ul>${reasons}</ul>`;
+    reasonsEl.innerHTML = `<strong>Esta venta no se pudo interpretar de forma segura y no se puede confirmar.</strong><div>Vuelve a grabarla desde el inicio, corrigiendo lo que se dijo.</div><ul>${reasons}</ul>`;
   }
 
   confirmBtn.disabled = !data.confirm_enabled;
+
   if (data.confirmation_status !== 'PENDING_CONFIRMATION') {
-    statusEl.style.display = 'block';
-    statusEl.textContent = `Estado actual: ${data.confirmation_status}`;
     confirmBtn.disabled = true;
     rejectBtn.disabled = true;
+    const state = describeOutcomeState(data);
+    showStatus(state.message);
+    if (state.keepPolling) {
+      pollInvoiceStatus();
+    }
   }
 }
 
@@ -104,8 +116,52 @@ function showStatus(text) {
   statusEl.textContent = text;
 }
 
+// Pure mapping from a GET /phase7-get-sale response to a single non-technical, Spanish,
+// owner-facing message. Never surfaces internal state names, HTTP codes, or execution IDs.
+// keepPolling is true only for a state that is genuinely still in progress -- a terminal
+// or ambiguous outcome always stops here and tells the owner what to do, never gets retried.
+function describeOutcomeState(data) {
+  if (data.confirmation_status === 'REJECTED') {
+    return {
+      message: 'Esta venta fue rechazada. No se creo ninguna factura. Si el cliente todavia necesita la factura, graba la venta de nuevo desde el inicio.',
+      keepPolling: false
+    };
+  }
+
+  if (data.confirmation_status === 'CONFIRMED') {
+    switch (data.invoice_status) {
+      case 'CREATED':
+        return {
+          message: 'Venta enviada a la DIAN correctamente. Esta venta ya quedo registrada: no la vuelvas a confirmar ni la grabes de nuevo.',
+          keepPolling: false
+        };
+      case 'FAILED':
+        return {
+          message: 'No se pudo crear la factura de esta venta. No vuelvas a confirmarla ni la grabes de nuevo. Reporta esta venta para revision antes de hacer cualquier otra cosa.',
+          keepPolling: false
+        };
+      case 'RECONCILIATION_REQUIRED':
+        return {
+          message: 'No podemos confirmar si esta factura ya fue creada en Siigo. No repitas ni vuelvas a grabar esta venta. Antes de hacer cualquier otra cosa, verifica directamente en Siigo, o reporta esta venta para revision.',
+          keepPolling: false
+        };
+      default:
+        return {
+          message: 'La venta se esta procesando. No cierres esta pantalla ni vuelvas a confirmar.',
+          keepPolling: true
+        };
+    }
+  }
+
+  return {
+    message: 'Esta venta ya no esta disponible para confirmar o rechazar. Si necesitas ayuda, reportala para revision.',
+    keepPolling: false
+  };
+}
+
 // Read-only: polls the existing GET confirmation endpoint for invoice_status.
-// Never writes, never retries the action, stops on any terminal status or on timeout.
+// Never writes, never retries the confirm/reject action, stops on any terminal or
+// ambiguous status and tells the owner what to do -- never re-confirms automatically.
 async function pollInvoiceStatus() {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
 
@@ -121,24 +177,14 @@ async function pollInvoiceStatus() {
     }
     if (!data || !data.found) continue;
 
-    const status = data.invoice_status;
-
-    if (status === 'CREATED') {
-      showStatus('Venta enviada a la DIAN correctamente.');
+    const state = describeOutcomeState(data);
+    if (!state.keepPolling) {
+      showStatus(state.message);
       return;
     }
-    if (status === 'FAILED') {
-      showStatus('No se pudo enviar la venta a la DIAN. No vuelvas a confirmar esta venta.');
-      return;
-    }
-    if (status === 'RECONCILIATION_REQUIRED') {
-      showStatus('No se pudo confirmar el envio a la DIAN. No vuelvas a confirmar esta venta.');
-      return;
-    }
-    // NOT_CREATED / INVOICE_CREATING / unknown -- still in progress, keep polling
   }
 
-  showStatus('La venta todavia se esta procesando. No vuelvas a confirmarla.');
+  showStatus('La venta todavia se esta procesando. No la confirmes de nuevo. Puedes cerrar esta pantalla y volver a abrir este mismo enlace mas tarde para ver el resultado.');
 }
 
 async function sendAction(action) {
@@ -146,15 +192,21 @@ async function sendAction(action) {
   rejectBtn.disabled = true;
 
   if (action === 'confirm') {
-    showStatus('Enviando venta a la DIAN...');
+    showStatus('Enviando la venta a Siigo... No cierres esta pantalla ni vuelvas a presionar Confirmar.');
   }
 
-  const res = await fetch(`${BASE_URL}/phase7-sale-action`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sale_id: saleId, action })
-  });
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch(`${BASE_URL}/phase7-sale-action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sale_id: saleId, action })
+    });
+    data = await res.json();
+  } catch (err) {
+    showStatus('No pudimos confirmar si esta accion se envio correctamente. No la repitas desde aqui: cierra esta pantalla y vuelve a abrir este mismo enlace en unos minutos para ver el estado real de la venta.');
+    return; // buttons stay disabled -- no retry from this page load
+  }
 
   if (action === 'confirm' && data.result === 'confirmed') {
     await pollInvoiceStatus();
