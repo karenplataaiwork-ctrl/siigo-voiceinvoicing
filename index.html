@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>N8n workflows</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #555555;
+    --border: #e2e2e2;
+    --link: #1a5fb4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --fg: #e8e8e8;
+      --muted: #a2a2a2;
+      --border: #2c2f36;
+      --link: #7aa2e3;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 3rem 1.25rem 4rem;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin: 0 0 1.25rem;
+  }
+  p { margin: 0 0 1rem; }
+  ul {
+    margin: 0 0 1.5rem;
+    padding-left: 1.25rem;
+  }
+  li { margin-bottom: 0.5rem; }
+  a { color: var(--link); }
+  .note {
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  footer {
+    margin-top: 2.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>N8n workflows</h1>
+
+  <p>This application is used for private workflow automation.</p>
+
+  <p>
+    It connects authorized Google services, including Gmail, to
+    <a href="https://n8n.io" rel="noopener noreferrer">n8n</a> workflows.
+  </p>
+
+  <ul>
+    <li>Access is used only to perform automation actions explicitly configured by the account owner.</li>
+    <li>This is not a public SaaS product and is not offered to external customers.</li>
+  </ul>
+
+  <p class="note">
+    For details on how Google user data is handled, see the
+    <a href="privacy.html">Privacy Policy</a>.
+  </p>
+
+  <footer>
+    Private automation project &mdash; not a commercial service.
+  </footer>
+</main>
+</body>
+</html>
