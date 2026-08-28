@@ -1,0 +1,9 @@
+# Secrets / local tooling — never commit to this public repo
+.env
+.env.*
+.mcp.json
+*.pem
+*.key
+id_rsa*
+.DS_Store
+.claude/
