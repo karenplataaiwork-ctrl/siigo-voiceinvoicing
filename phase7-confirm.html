@@ -132,7 +132,7 @@ function describeOutcomeState(data) {
     switch (data.invoice_status) {
       case 'CREATED':
         return {
-          message: 'Venta enviada a la DIAN correctamente. Esta venta ya quedo registrada: no la vuelvas a confirmar ni la grabes de nuevo.',
+          message: 'Venta registrada y enviada a la DIAN para timbrado electrónico. Esta venta ya quedó registrada: no la vuelvas a confirmar ni la grabes de nuevo.',
           keepPolling: false
         };
       case 'FAILED':
